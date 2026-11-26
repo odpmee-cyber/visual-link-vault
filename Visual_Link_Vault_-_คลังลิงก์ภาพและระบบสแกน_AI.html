@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Link Vault - คลังลิงก์ภาพและระบบสแกน AI</title>
+    <!-- โหลด Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- โหลดฟอนต์ภาษาไทย Prompt -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- โหลด Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Prompt', 'sans-serif'],
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .glass-header {
+            background: rgba(255, 255, 255, 0.94);
+            backdrop-filter: blur(12px);
+        }
+        /* แอนิเมชันเส้นสแกน AI */
+        @keyframes scanLine {
+            0% { top: 0%; opacity: 0.25; }
+            50% { top: 94%; opacity: 1; }
+            100% { top: 0%; opacity: 0.25; }
+        }
+        .scanner-laser {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, transparent, #6366f1, #ec4899, transparent);
+            box-shadow: 0 0 15px #6366f1, 0 0 30px #ec4899;
+            animation: scanLine 2s infinite ease-in-out;
+            pointer-events: none;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- แถบแจ้งเตือน (Custom Toast Notification) -->
+    <div id="toast-container" class="fixed top-4 right-4 left-4 md:left-auto md:w-96 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- ส่วนหัว (Header) -->
+    <header class="glass-header sticky top-0 z-30 border-b border-slate-200/80 shadow-sm">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-indigo-200 shrink-0">
+                    <i data-lucide="scan-search" class="w-6 h-6"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="font-bold text-lg leading-tight text-slate-900 truncate">Visual Link Vault</h1>
+                    <p class="text-xs text-slate-500 truncate">สแกนภาพรวม • จับคู่ลิงก์ตามลำดับอัตโนมัติ</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <span id="vault-count-badge" class="text-xs font-semibold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full border border-indigo-100">
+                    คลัง: 0 รายการ
+                </span>
+                <button type="button" id="btn-open-apikey" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition" title="ตั้งค่า Gemini API Key (สำหรับเปิดใช้นอกระบบ)">
+                    <i data-lucide="key-round" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- แถบสลับ 2 แท็บหลัก -->
+        <div class="max-w-5xl mx-auto px-4 pb-2.5">
+            <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl">
+                <button type="button" id="tab-btn-scan" class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all bg-white text-indigo-600 shadow-sm">
+                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                    <span>สแกนค้นหาลิงก์</span>
+                </button>
+                <button type="button" id="tab-btn-vault" class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all text-slate-600 hover:text-slate-900">
+                    <i data-lucide="database" class="w-4 h-4"></i>
+                    <span>คลังสินค้า & ลิงก์</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- พื้นที่เนื้อหาหลัก -->
+    <main class="flex-1 max-w-5xl w-full mx-auto px-4 py-6">
+
+        <!-- ==================== แท็บที่ 1: สแกนค้นหาลิงก์ ==================== -->
+        <section id="view-scan" class="space-y-6">
+
+            <!-- แบนเนอร์แจ้งเตือนเมื่อคลังยังว่าง -->
+            <div id="empty-vault-banner" class="hidden bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div class="flex items-start gap-3">
+                    <div class="p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0 mt-0.5">
+                        <i data-lucide="info" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-amber-900 text-sm">ยังไม่มีรูปภาพและลิงก์ในคลังของคุณ</h3>
+                        <p class="text-xs text-amber-700 mt-0.5">กรุณาเพิ่มรูปสินค้าพร้อมลิงก์ในแท็บ "คลังสินค้า & ลิงก์" ก่อน หรือกดโหลดข้อมูลตัวอย่างเพื่อทดสอบระบบทันที</p>
+                    </div>
+                </div>
+                <div class="flex gap-2 w-full sm:w-auto">
+                    <button type="button" id="btn-banner-demo" class="flex-1 sm:flex-none whitespace-nowrap text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl transition shadow-sm">
+                        โหลดข้อมูลตัวอย่าง
+                    </button>
+                    <button type="button" id="btn-banner-vault" class="flex-1 sm:flex-none whitespace-nowrap text-xs font-semibold bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 px-3.5 py-2 rounded-xl transition">
+                        ไปเพิ่มรูปเอง
+                    </button>
+                </div>
+            </div>
+
+            <!-- กล่องอัปโหลดรูปภาพเพื่อสแกน -->
+            <div class="bg-white rounded-3xl p-5 sm:p-8 shadow-sm border border-slate-200/80">
+                <div class="text-center max-w-lg mx-auto mb-6">
+                    <h2 class="text-xl font-bold text-slate-900">อัปโหลดรูปภาพเพื่อสแกนหาลิงก์</h2>
+                    <p class="text-sm text-slate-500 mt-1">รองรับรูปที่มีสินค้าหลายชิ้นรวมกัน (เช่น รูปคอลลาจ, รูปแคปแชท, รูปชั้นวางของ) ระบบ AI จะแยกรายชิ้นและป๊อบอัพลิงก์ให้ตามลำดับ</p>
+                </div>
+
+                <!-- พื้นที่ Dropzone / เลือกรูปสแกน -->
+                <div id="scan-dropzone" class="relative border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/30 hover:bg-indigo-50/60 rounded-2xl p-6 sm:p-10 text-center transition-all cursor-pointer">
+                    <input type="file" id="scan-file-input" accept="image/*" class="hidden">
+
+                    <div id="scan-placeholder" class="space-y-3">
+                        <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                            <i data-lucide="image-plus" class="w-8 h-8"></i>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-slate-800">แตะเพื่อเลือกรูปภาพ หรือ ลากรูปมาวางที่นี่</p>
+                            <p class="text-xs text-slate-500 mt-1">สามารถวางรูปจากคลิปบอร์ด (Ctrl+V / Paste) ได้ทันที</p>
+                        </div>
+                        <div class="pt-2 flex flex-wrap justify-center gap-2">
+                            <span class="inline-flex items-center gap-1.5 text-xs font-medium bg-white text-slate-700 px-3.5 py-2 rounded-xl border border-slate-200 shadow-sm">
+                                <i data-lucide="folder-open" class="w-3.5 h-3.5 text-indigo-600"></i> เลือกจากอัลบั้ม
+                            </span>
+                            <button type="button" id="btn-trigger-camera" class="inline-flex items-center gap-1.5 text-xs font-medium bg-white text-slate-700 px-3.5 py-2 rounded-xl border border-slate-200 shadow-sm hover:bg-slate-50">
+                                <i data-lucide="camera" class="w-3.5 h-3.5 text-pink-600"></i> ถ่ายภาพด้วยกล้อง
+                            </button>
+                            <input type="file" id="scan-camera-input" accept="image/*" capture="environment" class="hidden">
+                        </div>
+                    </div>
+
+                    <!-- แสดงพรีวิวรูปที่กำลังจะสแกน -->
+                    <div id="scan-preview-wrapper" class="hidden relative max-w-md mx-auto rounded-2xl overflow-hidden shadow-md border border-slate-200 bg-slate-900">
+                        <img id="scan-preview-img" src="" alt="รูปที่ต้องการสแกน" class="w-full max-h-80 object-contain mx-auto block">
+                        <div id="scanner-animation" class="hidden scanner-laser"></div>
+                        <button type="button" id="btn-reset-scan" class="absolute top-2.5 right-2.5 bg-black/65 hover:bg-black/85 text-white p-2 rounded-xl backdrop-blur-sm transition z-10" title="เปลี่ยนรูป">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ปุ่มเริ่มสแกน -->
+                <div id="scan-action-bar" class="hidden mt-5 flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <button type="button" id="btn-start-scan" class="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-3.5 px-8 rounded-2xl shadow-lg shadow-indigo-200 transition transform active:scale-95">
+                        <i data-lucide="scan" class="w-5 h-5"></i>
+                        <span>เริ่มสแกนตรวจจับสินค้าทั้งหมดในรูป</span>
+                    </button>
+                </div>
+
+                <!-- สถานะกำลังประมวลผล AI -->
+                <div id="scan-loading" class="hidden mt-6 text-center space-y-2 py-4">
+                    <div class="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-indigo-50 text-indigo-700 text-sm font-medium">
+                        <svg class="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>AI กำลังวิเคราะห์รายละเอียดและจับคู่สินค้าทีละชิ้นตามลำดับ...</span>
+                    </div>
+                    <p class="text-xs text-slate-400">กำลังเปรียบเทียบกับรายการทั้งหมดในคลังของคุณ</p>
+                </div>
+            </div>
+
+            <!-- ส่วนแสดงผลลัพธ์การสแกน -->
+            <div id="scan-results-section" class="hidden space-y-4">
+                <div class="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200/80">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-bold">ผลการสแกน</span>
+                                <h3 id="scan-summary-title" class="font-bold text-lg text-slate-900">พบสินค้า 0 ชิ้น</h3>
+                            </div>
+                            <p id="scan-summary-desc" class="text-xs text-slate-500 mt-1">เรียงลำดับตามตำแหน่งที่ตรวจพบในรูปภาพ (บนลงล่าง ซ้ายไปขวา)</p>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" id="btn-reopen-popup" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm transition">
+                                <i data-lucide="layers" class="w-4 h-4"></i>
+                                <span>เปิดป๊อบอัพไล่ทีละชิ้น</span>
+                            </button>
+                            <button type="button" id="btn-open-all-links" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm transition">
+                                <i data-lucide="external-link" class="w-4 h-4"></i>
+                                <span>เปิดทุกลิงก์ที่เจอ</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="scan-results-list" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== แท็บที่ 2: คลังสินค้า & ลิงก์ ==================== -->
+        <section id="view-vault" class="hidden space-y-6">
+
+            <!-- กล่องเพิ่มรูปภาพและลิงก์ทีละหลายรูปพร้อมกัน (Bulk Upload) -->
+            <div class="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200/80">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-600"></i>
+                            <span>เพิ่มรูปภาพและลิงก์ (เลือกได้หลายรูปพร้อมกัน)</span>
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">เลือกรูปสินค้าหลายๆ รูปในครั้งเดียว แล้วกรอกลิงก์ของแต่ละรูปเพื่อบันทึกลงคลัง</p>
+                    </div>
+                    <button type="button" id="btn-pick-bulk" class="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0">
+                        <i data-lucide="images" class="w-4 h-4"></i>
+                        <span>เลือกรูปภาพ (หลายรูป)</span>
+                    </button>
+                    <input type="file" id="bulk-file-input" accept="image/*" multiple class="hidden">
+                </div>
+
+                <!-- พื้นที่ลากวางสำหรับเพิ่มหลายรูป -->
+                <div id="bulk-dropzone" class="border-2 border-dashed border-slate-200 hover:border-indigo-400 bg-slate-50/70 hover:bg-indigo-50/30 rounded-2xl p-6 text-center cursor-pointer transition">
+                    <i data-lucide="upload-cloud" class="w-8 h-8 text-slate-400 mx-auto mb-2"></i>
+                    <p class="text-sm font-medium text-slate-700">คลิกเพื่อเลือกรูปภาพหลายรูปพร้อมกัน หรือลากไฟล์มาวางที่นี่</p>
+                    <p class="text-xs text-slate-400 mt-1">ระบบจะย่อขนาดรูปอัตโนมัติเพื่อให้บันทึกได้รวดเร็วและเก็บได้จำนวนมาก</p>
+                </div>
+
+                <!-- รายการรูปที่กำลังรอการกรอกลิงก์และบันทึก (Staging Area) -->
+                <div id="bulk-staging-area" class="hidden mt-6 space-y-4">
+                    <div class="flex items-center justify-between bg-indigo-50 px-4 py-2.5 rounded-xl border border-indigo-100">
+                        <span id="bulk-staging-count" class="text-sm font-semibold text-indigo-900">เลือกไว้ 0 รูป</span>
+                        <div class="flex gap-2">
+                            <button type="button" id="btn-clear-staging" class="text-xs font-medium text-slate-600 hover:text-red-600 px-2.5 py-1 rounded-lg">ล้างรายการ</button>
+                            <button type="button" id="btn-add-more-staging" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 px-2.5 py-1 rounded-lg">+ เพิ่มรูปอีก</button>
+                        </div>
+                    </div>
+
+                    <div id="bulk-staging-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+                    <div class="pt-2 flex justify-end gap-3">
+                        <button type="button" id="btn-cancel-staging" class="px-5 py-3 rounded-xl text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+                            ยกเลิก
+                        </button>
+                        <button type="button" id="btn-save-bulk" class="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-200 transition">
+                            <i data-lucide="save" class="w-4 h-4"></i>
+                            <span>บันทึกทั้งหมดลงคลัง</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- รายการทั้งหมดในคลัง -->
+            <div class="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200/80 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-900">รายการในคลังทั้งหมด</h3>
+                        <p class="text-xs text-slate-500">ข้อมูลถูกบันทึกไว้ในฐานข้อมูล IndexedDB ของเบราว์เซอร์</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" id="btn-vault-demo" class="inline-flex items-center gap-1.5 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl transition">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> ตัวอย่างทดสอบ
+                        </button>
+                        <button type="button" id="btn-export-json" class="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl transition">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i> สำรองข้อมูล (Export)
+                        </button>
+                        <button type="button" id="btn-import-json" class="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl transition">
+                            <i data-lucide="upload" class="w-3.5 h-3.5"></i> นำเข้า (Import)
+                        </button>
+                        <input type="file" id="import-json-input" accept=".json" class="hidden">
+                    </div>
+                </div>
+
+                <!-- ช่องค้นหาในคลัง -->
+                <div class="relative">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+                    <input type="text" id="vault-search-input" placeholder="ค้นหาชื่อสินค้า หรือ ลิงก์ในคลัง..." class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition">
+                </div>
+
+                <!-- กริดแสดงรายการในคลัง -->
+                <div id="vault-items-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2"></div>
+
+                <!-- กรณีไม่มีข้อมูลในคลัง -->
+                <div id="vault-empty-state" class="hidden text-center py-12 px-4">
+                    <div class="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                        <i data-lucide="package-open" class="w-8 h-8"></i>
+                    </div>
+                    <h4 class="font-semibold text-slate-700">ยังไม่มีรายการในคลัง</h4>
+                    <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">อัปโหลดรูปภาพสินค้าพร้อมใส่ลิงก์ด้านบน เพื่อเริ่มต้นสร้างฐานข้อมูลสำหรับสแกน</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ==================== MODAL 1: ป๊อบอัพแสดงลิงก์ตามลำดับ ==================== -->
+    <div id="sequential-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
+            <!-- แถบหัวป๊อบอัพบอกลำดับ -->
+            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-4 text-white flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span id="seq-badge" class="bg-white/20 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full">
+                        ชิ้นที่ 1 / 3
+                    </span>
+                    <span id="seq-confidence" class="text-xs text-indigo-100 font-medium">
+                        ตรงกัน 98%
+                    </span>
+                </div>
+                <button type="button" id="btn-close-seq" class="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- เนื้อหาในป๊อบอัพ -->
+            <div class="p-5 space-y-4">
+                <div class="bg-slate-50 rounded-2xl p-3 border border-slate-200/80">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">รายละเอียดที่ตรวจพบในภาพสแกน</p>
+                    <p id="seq-detected-desc" class="text-xs text-slate-700 font-medium bg-white p-2.5 rounded-xl border border-slate-100"></p>
+                </div>
+
+                <div class="flex items-center gap-4 bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
+                    <img id="seq-vault-img" src="" alt="รูปสินค้าในคลัง" class="w-20 h-20 rounded-xl object-cover border border-slate-200 bg-white shrink-0 shadow-sm">
+                    <div class="min-w-0 flex-1">
+                        <span class="text-[11px] font-semibold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-md">รายการที่จับคู่ได้</span>
+                        <h4 id="seq-vault-title" class="font-bold text-slate-900 text-base truncate mt-1">ชื่อสินค้า</h4>
+                        <p id="seq-vault-url" class="text-xs text-slate-500 truncate mt-0.5">https://...</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5 pt-1">
+                    <button type="button" id="seq-btn-open" class="col-span-2 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-md shadow-emerald-200 transition active:scale-95">
+                        <i data-lucide="external-link" class="w-5 h-5"></i>
+                        <span>เปิดลิงก์สินค้านี้ทันที</span>
+                    </button>
+                    <button type="button" id="seq-btn-copy" class="col-span-2 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium py-2.5 px-4 rounded-xl transition">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                        <span>คัดลอกลิงก์</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- แถบปุ่มเลื่อนดูชิ้นก่อนหน้า / ชิ้นถัดไป -->
+            <div class="bg-slate-50 px-5 py-3.5 border-t border-slate-200/80 flex items-center justify-between gap-3">
+                <button type="button" id="seq-btn-prev" class="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none transition">
+                    <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                    <span>ก่อนหน้า</span>
+                </button>
+
+                <div id="seq-dots" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar px-1"></div>
+
+                <button type="button" id="seq-btn-next" class="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition">
+                    <span id="seq-btn-next-text">ชิ้นถัดไป</span>
+                    <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL 2: แก้ไขรายการในคลัง ==================== -->
+    <div id="edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-lg text-slate-900">แก้ไขข้อมูลสินค้า</h3>
+                <button type="button" id="btn-close-edit" class="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <input type="hidden" id="edit-item-id">
+            <div class="flex justify-center">
+                <img id="edit-item-img" src="" class="w-32 h-32 object-cover rounded-2xl border border-slate-200 shadow-sm">
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">ชื่อสินค้า / หมายเหตุ</label>
+                    <input type="text" id="edit-item-title" class="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">ลิงก์สินค้า (URL)</label>
+                    <input type="url" id="edit-item-url" class="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" id="btn-cancel-edit" class="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200">ยกเลิก</button>
+                <button type="button" id="btn-save-edit" class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700">บันทึกการแก้ไข</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL 3: ตั้งค่า Gemini API Key ==================== -->
+    <div id="apikey-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-lg text-slate-900">ตั้งค่า Gemini API Key</h3>
+                <button type="button" id="btn-close-apikey" class="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-500 leading-relaxed">
+                หากเปิดใช้งานในหน้าต่างนี้สามารถสแกนได้ทันทีโดยไม่ต้องใส่คีย์ แต่หากดาวน์โหลดไฟล์ไปเปิดในเบราว์เซอร์ภายนอก กรุณากรอก Gemini API Key ของคุณที่นี่ (เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น)
+            </p>
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Gemini API Key</label>
+                <input type="password" id="gemini-apikey-input" placeholder="AIza..." class="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" id="btn-cancel-apikey" class="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200">ยกเลิก</button>
+                <button type="button" id="btn-save-apikey" class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700">บันทึกคีย์</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================================
+        // 1. การตั้งค่าฐานข้อมูล IndexedDB และตัวแปรสถานะหลัก
+        // ============================================================================
+        const DB_NAME = 'VisualLinkVaultDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'items';
+        const API_KEY_STORAGE = 'vlv_gemini_api_key';
+
+        let dbInstance = null;
+        let vaultItems = [];
+        let bulkStagingItems = [];
+        let currentScanImageBase64 = null;
+        let matchedResults = [];
+        let currentSeqIndex = 0;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function sanitizeUrl(rawUrl) {
+            if (!rawUrl) return '';
+            let clean = String(rawUrl).trim();
+            if (!clean) return '';
+            if (!/^https?:\/\//i.test(clean)) {
+                clean = 'https://' + clean;
+            }
+            try {
+                const parsed = new URL(clean);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    return parsed.href;
+                }
+                return '';
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    dbInstance = e.target.result;
+                    resolve(dbInstance);
+                };
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function loadAllVaultItems() {
+            if (!dbInstance) await initDB();
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const req = store.getAll();
+                req.onsuccess = () => {
+                    vaultItems = (req.result || []).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    updateVaultUI();
+                    resolve(vaultItems);
+                };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function putVaultItem(item) {
+            if (!dbInstance) await initDB();
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                const req = store.put(item);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function deleteVaultItemFromDB(id) {
+            if (!dbInstance) await initDB();
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                const req = store.delete(id);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        // ============================================================================
+        // 2. การจัดการรูปภาพและ UI Helpers
+        // ============================================================================
+        function compressImageToBase64(file, maxWidth = 800, quality = 0.82) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > maxWidth || height > maxWidth) {
+                            if (width > height) {
+                                height = Math.round((height * maxWidth) / width);
+                                width = maxWidth;
+                            } else {
+                                width = Math.round((width * maxWidth) / height);
+                                height = maxWidth;
+                            }
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function switchTab(tabName) {
+            const scanView = document.getElementById('view-scan');
+            const vaultView = document.getElementById('view-vault');
+            const btnScan = document.getElementById('tab-btn-scan');
+            const btnVault = document.getElementById('tab-btn-vault');
+
+            if (tabName === 'scan') {
+                scanView.classList.remove('hidden');
+                vaultView.classList.add('hidden');
+                btnScan.className = 'flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all bg-white text-indigo-600 shadow-sm';
+                btnVault.className = 'flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all text-slate-600 hover:text-slate-900';
+            } else {
+                scanView.classList.add('hidden');
+                vaultView.classList.remove('hidden');
+                btnVault.className = 'flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all bg-white text-indigo-600 shadow-sm';
+                btnScan.className = 'flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-sm transition-all text-slate-600 hover:text-slate-900';
+            }
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = {
+                success: 'bg-emerald-600 text-white',
+                error: 'bg-rose-600 text-white',
+                warning: 'bg-amber-600 text-white',
+                info: 'bg-slate-800 text-white'
+            };
+            const icons = {
+                success: 'check-circle',
+                error: 'alert-circle',
+                warning: 'alert-triangle',
+                info: 'info'
+            };
+            toast.className = `${colors[type] || colors.info} px-4 py-3 rounded-2xl shadow-lg flex items-center gap-2.5 text-sm font-medium pointer-events-auto transition-all`;
+            toast.innerHTML = `<i data-lucide="${icons[type] || icons.info}" class="w-4 h-4 shrink-0"></i><span class="flex-1">${escapeHtml(message)}</span>`;
+            container.appendChild(toast);
+            if (window.lucide) window.lucide.createIcons();
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3400);
+        }
+
+        function copyTextToClipboard(text) {
+            if (!text) return;
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showToast('คัดลอกลิงก์เรียบร้อยแล้ว!', 'success');
+            } catch (_) {
+                showToast('ไม่สามารถคัดลอกลิงก์ได้', 'error');
+            }
+            document.body.removeChild(textarea);
+        }
+
+        // ============================================================================
+        // 3. ระบบเพิ่มรูปภาพและลิงก์ทีละหลายรูปพร้อมกัน (Bulk Upload)
+        // ============================================================================
+        async function processFilesToStaging(files) {
+            const imageFiles = files.filter((f) => f && f.type && f.type.startsWith('image/'));
+            if (!imageFiles.length) return;
+
+            showToast(`กำลังเตรียมรูปภาพ ${imageFiles.length} รูป...`, 'info');
+            for (const file of imageFiles) {
+                try {
+                    const compressedDataUrl = await compressImageToBase64(file, 450, 0.78);
+                    const cleanName = (file.name || 'สินค้า').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+                    bulkStagingItems.push({
+                        tempId: 'tmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                        image: compressedDataUrl,
+                        title: cleanName,
+                        url: ''
+                    });
+                } catch (_) {
+                    // ข้ามไฟล์ที่ไม่รองรับ
+                }
+            }
+            renderBulkStaging();
+        }
+
+        function renderBulkStaging() {
+            const area = document.getElementById('bulk-staging-area');
+            const list = document.getElementById('bulk-staging-list');
+            const countLabel = document.getElementById('bulk-staging-count');
+
+            if (bulkStagingItems.length === 0) {
+                area.classList.add('hidden');
+                list.innerHTML = '';
+                return;
+            }
+
+            area.classList.remove('hidden');
+            countLabel.textContent = `เตรียมบันทึก ${bulkStagingItems.length} รูป (กรอกลิงก์ของแต่ละรูปด้านล่าง)`;
+
+            list.innerHTML = bulkStagingItems.map((item, idx) => `
+                <div class="flex gap-3 p-3.5 rounded-2xl border border-slate-200 bg-slate-50/60 items-start">
+                    <img src="${item.image}" class="w-20 h-20 rounded-xl object-cover border border-slate-200 bg-white shrink-0">
+                    <div class="flex-1 min-w-0 space-y-2">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-xs font-bold text-indigo-600">รูปที่ ${idx + 1}</span>
+                            <button type="button" data-action="remove-staging" data-id="${escapeHtml(item.tempId)}" class="text-slate-400 hover:text-rose-600 p-1" title="ลบรูปนี้ออก">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <input type="text" data-field="title" data-id="${escapeHtml(item.tempId)}" value="${escapeHtml(item.title)}" placeholder="ชื่อสินค้า / หมายเหตุ (ไม่บังคับ)" class="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <input type="url" data-field="url" data-id="${escapeHtml(item.tempId)}" value="${escapeHtml(item.url)}" placeholder="วางลิงก์สินค้าที่นี่ (เช่น https://...)" class="w-full px-3 py-1.5 text-xs bg-white border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+            `).join('');
+
+            list.querySelectorAll('input[data-field]').forEach((inputEl) => {
+                inputEl.addEventListener('input', (e) => {
+                    const id = e.target.getAttribute('data-id');
+                    const field = e.target.getAttribute('data-field');
+                    const target = bulkStagingItems.find((i) => i.tempId === id);
+                    if (target && field) target[field] = e.target.value;
+                });
+            });
+
+            list.querySelectorAll('button[data-action="remove-staging"]').forEach((btnEl) => {
+                btnEl.addEventListener('click', () => {
+                    const id = btnEl.getAttribute('data-id');
+                    bulkStagingItems = bulkStagingItems.filter((i) => i.tempId !== id);
+                    renderBulkStaging();
+                });
+            });
+
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        function clearBulkStaging() {
+            bulkStagingItems = [];
+            renderBulkStaging();
+        }
+
+        async function saveAllBulkItems() {
+            if (bulkStagingItems.length === 0) return;
+
+            for (let i = 0; i < bulkStagingItems.length; i++) {
+                const validUrl = sanitizeUrl(bulkStagingItems[i].url);
+                if (!validUrl) {
+                    showToast(`กรุณากรอกลิงก์ (URL) ที่ถูกต้องของรูปที่ ${i + 1}`, 'warning');
+                    return;
+                }
+            }
+
+            let savedCount = 0;
+            for (const item of bulkStagingItems) {
+                const newItem = {
+                    id: 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                    image: item.image,
+                    title: (item.title || '').trim() || `สินค้า #${vaultItems.length + savedCount + 1}`,
+                    url: sanitizeUrl(item.url),
+                    createdAt: Date.now() + savedCount
+                };
+                await putVaultItem(newItem);
+                savedCount++;
+            }
+
+            bulkStagingItems = [];
+            renderBulkStaging();
+            await loadAllVaultItems();
+            showToast(`บันทึกสำเร็จ ${savedCount} รายการลงคลังเรียบร้อย!`, 'success');
+        }
+
+        // ============================================================================
+        // 4. การจัดการรายการในคลัง (Render, Edit, Delete, Export/Import, Demo)
+        // ============================================================================
+        function updateVaultUI() {
+            const badge = document.getElementById('vault-count-badge');
+            const emptyBanner = document.getElementById('empty-vault-banner');
+            badge.textContent = `คลัง: ${vaultItems.length} รายการ`;
+
+            if (vaultItems.length === 0) {
+                emptyBanner.classList.remove('hidden');
+            } else {
+                emptyBanner.classList.add('hidden');
+            }
+            renderVaultGrid();
+        }
+
+        function renderVaultGrid() {
+            const grid = document.getElementById('vault-items-grid');
+            const emptyState = document.getElementById('vault-empty-state');
+            const keyword = document.getElementById('vault-search-input').value.toLowerCase().trim();
+
+            const filtered = vaultItems.filter((item) =>
+                (item.title || '').toLowerCase().includes(keyword) ||
+                (item.url || '').toLowerCase().includes(keyword)
+            );
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            grid.innerHTML = filtered.map((item) => {
+                const safeHref = sanitizeUrl(item.url) || '#';
+                return `
+                    <div class="group bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col">
+                        <div class="relative aspect-square bg-slate-100 overflow-hidden">
+                            <img src="${item.image}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+                            <div class="absolute top-2 right-2 flex gap-1.5">
+                                <button type="button" data-action="edit-item" data-id="${escapeHtml(item.id)}" class="p-2 rounded-xl bg-white/90 hover:bg-white text-slate-700 shadow-sm backdrop-blur-sm transition" title="แก้ไข">
+                                    <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <button type="button" data-action="delete-item" data-id="${escapeHtml(item.id)}" class="p-2 rounded-xl bg-white/90 hover:bg-rose-50 text-rose-600 shadow-sm backdrop-blur-sm transition" title="ลบ">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-3.5 flex-1 flex flex-col justify-between space-y-2.5">
+                            <div>
+                                <h4 class="font-semibold text-sm text-slate-900 truncate">${escapeHtml(item.title)}</h4>
+                                <p class="text-xs text-slate-500 truncate mt-0.5">${escapeHtml(safeHref)}</p>
+                            </div>
+                            <div class="flex gap-2 pt-1">
+                                <a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold py-2 px-3 rounded-xl transition">
+                                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i> เปิดลิงก์
+                                </a>
+                                <button type="button" data-action="copy-url" data-url="${escapeHtml(safeHref)}" class="p-2 rounded-xl bg-slate-200/70 hover:bg-slate-200 text-slate-700 transition" title="คัดลอกลิงก์">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            grid.querySelectorAll('button[data-action="edit-item"]').forEach((btn) => {
+                btn.addEventListener('click', () => openEditModal(btn.getAttribute('data-id')));
+            });
+            grid.querySelectorAll('button[data-action="delete-item"]').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.getAttribute('data-id');
+                    if (id) {
+                        await deleteVaultItemFromDB(id);
+                        await loadAllVaultItems();
+                        showToast('ลบรายการออกจากคลังแล้ว', 'info');
+                    }
+                });
+            });
+            grid.querySelectorAll('button[data-action="copy-url"]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const u = btn.getAttribute('data-url');
+                    if (u) copyTextToClipboard(u);
+                });
+            });
+
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        function openEditModal(id) {
+            const item = vaultItems.find((i) => i.id === id);
+            if (!item) return;
+            document.getElementById('edit-item-id').value = item.id;
+            document.getElementById('edit-item-img').src = item.image;
+            document.getElementById('edit-item-title').value = item.title;
+            document.getElementById('edit-item-url').value = item.url;
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        async function saveEditedItem() {
+            const id = document.getElementById('edit-item-id').value;
+            const title = document.getElementById('edit-item-title').value.trim();
+            const validUrl = sanitizeUrl(document.getElementById('edit-item-url').value);
+
+            if (!validUrl) {
+                showToast('กรุณาระบุลิงก์ (URL) ที่ถูกต้อง', 'warning');
+                return;
+            }
+
+            const existing = vaultItems.find((i) => i.id === id);
+            if (existing) {
+                existing.title = title || existing.title;
+                existing.url = validUrl;
+                await putVaultItem(existing);
+                await loadAllVaultItems();
+                closeEditModal();
+                showToast('อัปเดตข้อมูลสำเร็จ', 'success');
+            }
+        }
+
+        function exportVaultJSON() {
+            if (vaultItems.length === 0) {
+                showToast('ไม่มีข้อมูลในคลังให้สำรอง', 'warning');
+                return;
+            }
+            const dataStr = JSON.stringify(vaultItems, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `visual-link-vault-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('ดาวน์โหลดไฟล์สำรองข้อมูลเรียบร้อย', 'success');
+        }
+
+        function importVaultJSON(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (!Array.isArray(imported)) throw new Error('Invalid format');
+                    let count = 0;
+                    for (const item of imported) {
+                        const validUrl = sanitizeUrl(item?.url);
+                        if (item && item.image && validUrl) {
+                            await putVaultItem({
+                                id: item.id || ('imp_' + Date.now() + '_' + count),
+                                image: item.image,
+                                title: item.title || 'สินค้านำเข้า',
+                                url: validUrl,
+                                createdAt: item.createdAt || (Date.now() + count)
+                            });
+                            count++;
+                        }
+                    }
+                    await loadAllVaultItems();
+                    showToast(`นำเข้าข้อมูลสำเร็จ ${count} รายการ`, 'success');
+                } catch (_) {
+                    showToast('ไฟล์สำรองข้อมูลไม่ถูกต้อง', 'error');
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        async function loadDemoData() {
+            const createDemoGraphic = (bgColor, emoji, label) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 300;
+                canvas.height = 300;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(0, 0, 300, 300);
+                ctx.font = '120px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(emoji, 150, 130);
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 24px Prompt, sans-serif';
+                ctx.fillText(label, 150, 245);
+                return canvas.toDataURL('image/jpeg', 0.85);
+            };
+
+            const demos = [
+                {
+                    id: 'demo_bag_01',
+                    title: 'กระเป๋าถือแฟชั่นสีแดง (Red Handbag)',
+                    url: 'https://shopee.co.th/search?keyword=%E0%B8%81%E0%B8%A3%E0%B8%B0%E0%B9%80%E0%B8%9B%E0%B9%8B%E0%B8%B2%E0%B8%96%E0%B8%B7%E0%B8%AD%E0%B8%AA%E0%B8%B5%E0%B9%81%E0%B8%94%E0%B8%87',
+                    image: createDemoGraphic('#fee2e2', '👜', 'กระเป๋าแฟชั่น'),
+                    createdAt: Date.now() + 1
+                },
+                {
+                    id: 'demo_sneaker_02',
+                    title: 'รองเท้าผ้าใบวิ่ง (Sport Sneaker)',
+                    url: 'https://www.lazada.co.th/catalog/?q=%E0%B8%A3%E0%B8%AD%E0%B8%87%E0%B9%80%E0%B8%97%E0%B9%89%E0%B8%B2%E0%B8%9C%E0%B9%89%E0%B8%B2%E0%B9%83%E0%B8%9A%E0%B8%A7%E0%B8%B4%E0%B9%88%E0%B8%87',
+                    image: createDemoGraphic('#e0e7ff', '👟', 'รองเท้าผ้าใบ'),
+                    createdAt: Date.now() + 2
+                },
+                {
+                    id: 'demo_watch_03',
+                    title: 'นาฬิกาข้อมือสมาร์ทวอทช์ (Smart Watch)',
+                    url: 'https://shopee.co.th/search?keyword=smartwatch',
+                    image: createDemoGraphic('#dcfce7', '⌚', 'สมาร์ทวอทช์'),
+                    createdAt: Date.now() + 3
+                }
+            ];
+
+            for (const d of demos) {
+                await putVaultItem(d);
+            }
+            await loadAllVaultItems();
+            showToast('โหลดข้อมูลสินค้าตัวอย่าง 3 รายการเรียบร้อย!', 'success');
+        }
+
+        // ============================================================================
+        // 5. ระบบ AI สแกนตรวจจับหลายชิ้นใน 1 รูป (Gemini API) & ป๊อบอัพตามลำดับ
+        // ============================================================================
+        function getStoredApiKey() {
+            return (localStorage.getItem(API_KEY_STORAGE) || '').trim();
+        }
+
+        function openApiKeyModal() {
+            document.getElementById('gemini-apikey-input').value = getStoredApiKey();
+            document.getElementById('apikey-modal').classList.remove('hidden');
+        }
+
+        function closeApiKeyModal() {
+            document.getElementById('apikey-modal').classList.add('hidden');
+        }
+
+        function saveApiKey() {
+            const val = document.getElementById('gemini-apikey-input').value.trim();
+            localStorage.setItem(API_KEY_STORAGE, val);
+            closeApiKeyModal();
+            showToast(val ? 'บันทึก Gemini API Key เรียบร้อย!' : 'ล้างค่า API Key แล้ว', 'success');
+        }
+
+        async function setScanImageFromFile(file) {
+            try {
+                const compressed = await compressImageToBase64(file, 1024, 0.85);
+                currentScanImageBase64 = compressed;
+
+                document.getElementById('scan-preview-img').src = compressed;
+                document.getElementById('scan-placeholder').classList.add('hidden');
+                document.getElementById('scan-preview-wrapper').classList.remove('hidden');
+                document.getElementById('scan-action-bar').classList.remove('hidden');
+                document.getElementById('scan-results-section').classList.add('hidden');
+            } catch (_) {
+                showToast('ไม่สามารถโหลดรูปภาพได้', 'error');
+            }
+        }
+
+        function resetScanBox() {
+            currentScanImageBase64 = null;
+            document.getElementById('scan-preview-img').src = '';
+            document.getElementById('scan-placeholder').classList.remove('hidden');
+            document.getElementById('scan-preview-wrapper').classList.add('hidden');
+            document.getElementById('scan-action-bar').classList.add('hidden');
+            document.getElementById('scan-results-section').classList.add('hidden');
+        }
+
+        async function startAIScan() {
+            if (!currentScanImageBase64) {
+                showToast('กรุณาเลือกรูปภาพที่ต้องการสแกนก่อน', 'warning');
+                return;
+            }
+            if (vaultItems.length === 0) {
+                showToast('คลังสินค้าของคุณยังว่างอยู่ กรุณาเพิ่มรูปสินค้าและลิงก์ก่อนสแกน', 'warning');
+                switchTab('vault');
+                return;
+            }
+
+            const btnStart = document.getElementById('btn-start-scan');
+            const loadingBox = document.getElementById('scan-loading');
+            const laser = document.getElementById('scanner-animation');
+
+            btnStart.disabled = true;
+            btnStart.classList.add('opacity-50', 'pointer-events-none');
+            loadingBox.classList.remove('hidden');
+            laser.classList.remove('hidden');
+            document.getElementById('scan-results-section').classList.add('hidden');
+
+            try {
+                const candidateItems = vaultItems.slice(0, 25);
+                const parts = [
+                    {
+                        text: `คุณคือระบบ AI Visual Product Scanner อัจฉริยะ หน้าที่ของคุณคือ:
+1. วิเคราะห์ "รูปภาพเป้าหมาย (TARGET IMAGE)" อย่างละเอียดถี่ถ้วน เพื่อตรวจจับว่าในรูปภาพรวมนี้มีสินค้า วัตถุ หรือรูปย่อยๆ ซ่อนอยู่กี่ชิ้น เรียงลำดับจากบนลงล่าง ซ้ายไปขวา
+2. นำสิ่งของแต่ละชิ้นที่ตรวจพบในรูปเป้าหมาย ไปเปรียบเทียบกับ "รายการรูปภาพในคลังอ้างอิง (VAULT CATALOG)" ที่แนบมาด้านล่างนี้ทีละรายการ
+3. จับคู่แบบ 1 ชิ้นในรูปต่อ 1 รายการในคลัง (ไม่จับคู่รายการในคลังซ้ำซ้อนหากในรูปมีแค่ชิ้นเดียว) โดยดูจากรูปร่าง สี ลวดลาย ประเภทสินค้า และรายละเอียดต่างๆ
+4. ส่งผลลัพธ์กลับมาเป็น JSON ตามโครงสร้างที่กำหนด เรียงลำดับชิ้นที่ 1, 2, 3... ตามตำแหน่งที่พบในรูปเป้าหมาย เฉพาะรายการที่มั่นใจว่าตรงกับในคลังตั้งแต่ 60% ขึ้นไป
+
+--- เริ่มต้น: รูปภาพเป้าหมาย (TARGET IMAGE) ที่ต้องการสแกน ---`
+                    },
+                    {
+                        inlineData: {
+                            mimeType: 'image/jpeg',
+                            data: currentScanImageBase64.split(',')[1]
+                        }
+                    },
+                    {
+                        text: `--- สิ้นสุดรูปภาพเป้าหมาย ---\n\nต่อไปนี้คือรายการสินค้าทั้งหมดในคลังอ้างอิง (VAULT CATALOG) มีทั้งหมด ${candidateItems.length} รายการ:`
+                    }
+                ];
+
+                candidateItems.forEach((item, index) => {
+                    parts.push({
+                        text: `\n[รายการในคลัง #${index + 1}] ID: "${item.id}" | ชื่อ: "${item.title}"`
+                    });
+                    const base64Data = item.image.includes(',') ? item.image.split(',')[1] : item.image;
+                    const mimeMatch = item.image.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+                    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                    parts.push({
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Data
+                        }
+                    });
+                });
+
+                const apiKey = getStoredApiKey();
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+                const payload = {
+                    contents: [{ parts: parts }],
+                    generationConfig: {
+                        responseMimeType: 'application/json',
+                        responseSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                totalDetectedObjectsInImage: {
+                                    type: 'INTEGER',
+                                    description: 'จำนวนสิ่งของ/สินค้าย่อยทั้งหมดที่มองเห็นในรูปเป้าหมาย'
+                                },
+                                scanOverview: {
+                                    type: 'STRING',
+                                    description: 'สรุปภาพรวมสั้นๆ ภาษาไทยว่าในรูปสแกนมีอะไรบ้าง'
+                                },
+                                matchedItems: {
+                                    type: 'ARRAY',
+                                    description: 'รายการสินค้าที่ตรวจพบในรูปเป้าหมายและจับคู่ได้ตรงกับคลัง เรียงตามลำดับที่เจอ (บนลงล่าง ซ้ายไปขวา)',
+                                    items: {
+                                        type: 'OBJECT',
+                                        properties: {
+                                            order: {
+                                                type: 'INTEGER',
+                                                description: 'ลำดับที่เจอ (1, 2, 3...)'
+                                            },
+                                            vaultItemId: {
+                                                type: 'STRING',
+                                                description: 'ค่า ID ของรายการในคลังที่ตรงกันเป๊ะๆ'
+                                            },
+                                            detectedDescription: {
+                                                type: 'STRING',
+                                                description: 'คำอธิบายภาษาไทยสั้นๆ ว่าพบชิ้นนี้อยู่ตรงไหนของรูปและมีลักษณะอย่างไร'
+                                            },
+                                            confidencePercent: {
+                                                type: 'INTEGER',
+                                                description: 'ระดับความมั่นใจในการจับคู่ (0 - 100)'
+                                            }
+                                        },
+                                        required: ['order', 'vaultItemId', 'detectedDescription', 'confidencePercent']
+                                    }
+                                }
+                            },
+                            required: ['totalDetectedObjectsInImage', 'scanOverview', 'matchedItems']
+                        }
+                    }
+                };
+
+                const resultData = await fetchWithRetry(apiUrl, payload);
+                const rawText = resultData?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!rawText) throw new Error('ไม่ได้รับข้อมูลตอบกลับจาก AI');
+
+                const parsedResult = JSON.parse(rawText);
+                processScanOutput(parsedResult);
+
+            } catch (_) {
+                if (!getStoredApiKey()) {
+                    showToast('สแกนไม่สำเร็จ: หากเปิดนอกหน้าต่างแชท กรุณากดไอคอนกุญแจมุมขวาบนเพื่อใส่ Gemini API Key', 'warning');
+                } else {
+                    showToast('เกิดข้อผิดพลาดในการสแกน กรุณาตรวจสอบ API Key หรือการเชื่อมต่ออินเทอร์เน็ต', 'error');
+                }
+            } finally {
+                btnStart.disabled = false;
+                btnStart.classList.remove('opacity-50', 'pointer-events-none');
+                loadingBox.classList.add('hidden');
+                laser.classList.add('hidden');
+            }
+        }
+
+        async function fetchWithRetry(url, payload, maxRetries = 3) {
+            let delay = 1000;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                        if (response.status === 429 && attempt < maxRetries) {
+                            await new Promise((r) => setTimeout(r, delay));
+                            delay *= 2;
+                            continue;
+                        }
+                        throw new Error(`HTTP Error: ${response.status}`);
+                    }
+                    return await response.json();
+                } catch (err) {
+                    if (attempt === maxRetries) throw err;
+                    await new Promise((r) => setTimeout(r, delay));
+                    delay *= 2;
+                }
+            }
+        }
+
+        function processScanOutput(aiData) {
+            matchedResults = [];
+            const rawMatches = (aiData.matchedItems || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+            rawMatches.forEach((m) => {
+                const vaultItem = vaultItems.find((v) => v.id === m.vaultItemId);
+                if (vaultItem) {
+                    matchedResults.push({
+                        vaultItem: vaultItem,
+                        detectedDescription: m.detectedDescription,
+                        confidence: m.confidencePercent
+                    });
+                }
+            });
+
+            const resultsSection = document.getElementById('scan-results-section');
+            const summaryTitle = document.getElementById('scan-summary-title');
+            const summaryDesc = document.getElementById('scan-summary-desc');
+            const resultsList = document.getElementById('scan-results-list');
+            const btnReopen = document.getElementById('btn-reopen-popup');
+            const btnOpenAll = document.getElementById('btn-open-all-links');
+
+            resultsSection.classList.remove('hidden');
+
+            if (matchedResults.length === 0) {
+                summaryTitle.textContent = `ตรวจพบวัตถุในรูป ${aiData.totalDetectedObjectsInImage || 0} ชิ้น แต่ไม่ตรงกับรายการในคลัง`;
+                summaryDesc.textContent = aiData.scanOverview || 'ลองเพิ่มรูปสินค้าที่เกี่ยวข้องลงในคลัง แล้วสแกนใหม่อีกครั้ง';
+                resultsList.innerHTML = `
+                    <div class="col-span-full text-center py-8 bg-slate-50 rounded-2xl border border-slate-200">
+                        <p class="text-sm font-medium text-slate-700">ไม่พบสินค้าที่ตรงกับฐานข้อมูลในคลังของคุณ</p>
+                        <p class="text-xs text-slate-500 mt-1">${escapeHtml(aiData.scanOverview || '')}</p>
+                    </div>
+                `;
+                btnReopen.classList.add('hidden');
+                btnOpenAll.classList.add('hidden');
+                showToast('สแกนเสร็จสิ้น: ไม่พบรายการที่ตรงกับในคลัง', 'warning');
+                return;
+            }
+
+            btnReopen.classList.remove('hidden');
+            btnOpenAll.classList.remove('hidden');
+            summaryTitle.textContent = `พบสินค้าตรงกับคลัง ${matchedResults.length} ชิ้น!`;
+            summaryDesc.textContent = aiData.scanOverview || 'เรียงลำดับตามตำแหน่งที่ตรวจพบในรูปภาพ';
+
+            resultsList.innerHTML = matchedResults.map((res, index) => {
+                const safeHref = sanitizeUrl(res.vaultItem.url) || '#';
+                return `
+                    <div class="flex gap-3.5 p-3.5 rounded-2xl border border-indigo-100 bg-indigo-50/30 hover:bg-white transition shadow-sm">
+                        <div class="relative shrink-0">
+                            <img src="${res.vaultItem.image}" class="w-20 h-20 rounded-xl object-cover border border-slate-200 bg-white">
+                            <span class="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shadow">
+                                ${index + 1}
+                            </span>
+                        </div>
+                        <div class="flex-1 min-w-0 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center justify-between gap-2">
+                                    <h4 class="font-bold text-sm text-slate-900 truncate">${escapeHtml(res.vaultItem.title)}</h4>
+                                    <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">${res.confidence}%</span>
+                                </div>
+                                <p class="text-xs text-slate-600 line-clamp-2 mt-1">${escapeHtml(res.detectedDescription)}</p>
+                            </div>
+                            <div class="flex items-center gap-2 pt-2">
+                                <a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-1.5 px-3 rounded-xl transition">
+                                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i> เปิดลิงก์
+                                </a>
+                                <button type="button" data-action="open-seq" data-index="${index}" class="px-2.5 py-1.5 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs font-semibold transition">
+                                    ป๊อบอัพ
+                                </button>
+                                <button type="button" data-action="copy-match-url" data-url="${escapeHtml(safeHref)}" class="p-1.5 rounded-xl bg-slate-200/80 hover:bg-slate-300 text-slate-700 transition" title="คัดลอกลิงก์">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            resultsList.querySelectorAll('button[data-action="open-seq"]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const idx = Number(btn.getAttribute('data-index'));
+                    if (!Number.isNaN(idx)) openSequentialModal(idx);
+                });
+            });
+            resultsList.querySelectorAll('button[data-action="copy-match-url"]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const u = btn.getAttribute('data-url');
+                    if (u) copyTextToClipboard(u);
+                });
+            });
+
+            if (window.lucide) window.lucide.createIcons();
+
+            // เด้งป๊อบอัพชิ้นที่ 1 ขึ้นมาอัตโนมัติทันทีตามลำดับ
+            showToast(`พบสินค้า ${matchedResults.length} ชิ้น! กำลังเปิดป๊อบอัพตามลำดับ`, 'success');
+            openSequentialModal(0);
+        }
+
+        // ============================================================================
+        // 6. ระบบป๊อบอัพลิงก์ตามลำดับ (Sequential Link Popup Modal)
+        // ============================================================================
+        function openSequentialModal(index) {
+            if (matchedResults.length === 0) return;
+            currentSeqIndex = Math.max(0, Math.min(index, matchedResults.length - 1));
+            renderSequentialModalContent();
+            document.getElementById('sequential-modal').classList.remove('hidden');
+        }
+
+        function closeSequentialModal() {
+            document.getElementById('sequential-modal').classList.add('hidden');
+        }
+
+        function navigateSeqModal(step) {
+            const nextIdx = currentSeqIndex + step;
+            if (nextIdx >= 0 && nextIdx < matchedResults.length) {
+                currentSeqIndex = nextIdx;
+                renderSequentialModalContent();
+            } else if (nextIdx >= matchedResults.length) {
+                closeSequentialModal();
+                showToast('ดูครบทุกรายการที่พบแล้ว!', 'success');
+            }
+        }
+
+        function renderSequentialModalContent() {
+            const total = matchedResults.length;
+            const current = matchedResults[currentSeqIndex];
+
+            document.getElementById('seq-badge').textContent = `ชิ้นที่ ${currentSeqIndex + 1} / ${total}`;
+            document.getElementById('seq-confidence').textContent = `ความแม่นยำ ${current.confidence}%`;
+            document.getElementById('seq-detected-desc').textContent = current.detectedDescription;
+            document.getElementById('seq-vault-img').src = current.vaultItem.image;
+            document.getElementById('seq-vault-title').textContent = current.vaultItem.title;
+            document.getElementById('seq-vault-url').textContent = current.vaultItem.url;
+
+            const btnPrev = document.getElementById('seq-btn-prev');
+            const btnNextText = document.getElementById('seq-btn-next-text');
+            btnPrev.disabled = currentSeqIndex === 0;
+            btnNextText.textContent = currentSeqIndex === total - 1
+                ? 'เสร็จสิ้น'
+                : `ชิ้นถัดไป (${currentSeqIndex + 2}/${total})`;
+
+            const dotsContainer = document.getElementById('seq-dots');
+            dotsContainer.innerHTML = matchedResults.map((_, idx) => `
+                <button type="button" data-dot-idx="${idx}" class="h-2 rounded-full transition-all ${idx === currentSeqIndex ? 'w-6 bg-indigo-600' : 'w-2 bg-slate-300 hover:bg-slate-400'}"></button>
+            `).join('');
+
+            dotsContainer.querySelectorAll('button[data-dot-idx]').forEach((dotBtn) => {
+                dotBtn.addEventListener('click', () => {
+                    const idx = Number(dotBtn.getAttribute('data-dot-idx'));
+                    if (!Number.isNaN(idx)) openSequentialModal(idx);
+                });
+            });
+
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        function openCurrentSeqLink() {
+            const current = matchedResults[currentSeqIndex];
+            const safeUrl = sanitizeUrl(current?.vaultItem?.url);
+            if (safeUrl) {
+                window.open(safeUrl, '_blank', 'noopener,noreferrer');
+            }
+        }
+
+        function copyCurrentSeqLink() {
+            const current = matchedResults[currentSeqIndex];
+            const safeUrl = sanitizeUrl(current?.vaultItem?.url);
+            if (safeUrl) {
+                copyTextToClipboard(safeUrl);
+            }
+        }
+
+        function openAllMatchedLinks() {
+            if (matchedResults.length === 0) return;
+            matchedResults.forEach((res) => {
+                const safeUrl = sanitizeUrl(res.vaultItem?.url);
+                if (safeUrl) {
+                    window.open(safeUrl, '_blank', 'noopener,noreferrer');
+                }
+            });
+            showToast(`สั่งเปิดลิงก์ทั้งหมด ${matchedResults.length} รายการแล้ว`, 'info');
+        }
+
+        // ============================================================================
+        // 7. ผูก Event Listener ทั้งหมดอย่างสมบูรณ์
+        // ============================================================================
+        function bindAllEvents() {
+            document.getElementById('tab-btn-scan').addEventListener('click', () => switchTab('scan'));
+            document.getElementById('tab-btn-vault').addEventListener('click', () => switchTab('vault'));
+            document.getElementById('btn-banner-demo').addEventListener('click', loadDemoData);
+            document.getElementById('btn-banner-vault').addEventListener('click', () => switchTab('vault'));
+
+            // API Key Modal
+            document.getElementById('btn-open-apikey').addEventListener('click', openApiKeyModal);
+            document.getElementById('btn-close-apikey').addEventListener('click', closeApiKeyModal);
+            document.getElementById('btn-cancel-apikey').addEventListener('click', closeApiKeyModal);
+            document.getElementById('btn-save-apikey').addEventListener('click', saveApiKey);
+
+            // สแกนรูป
+            const scanDrop = document.getElementById('scan-dropzone');
+            const scanFileInput = document.getElementById('scan-file-input');
+            const scanCameraInput = document.getElementById('scan-camera-input');
+
+            scanDrop.addEventListener('click', () => {
+                if (!currentScanImageBase64) scanFileInput.click();
+            });
+            scanFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (file) await setScanImageFromFile(file);
+                e.target.value = '';
+            });
+            document.getElementById('btn-trigger-camera').addEventListener('click', (e) => {
+                e.stopPropagation();
+                scanCameraInput.click();
+            });
+            scanCameraInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (file) await setScanImageFromFile(file);
+                e.target.value = '';
+            });
+            document.getElementById('btn-reset-scan').addEventListener('click', (e) => {
+                e.stopPropagation();
+                resetScanBox();
+            });
+            document.getElementById('btn-start-scan').addEventListener('click', startAIScan);
+            document.getElementById('btn-reopen-popup').addEventListener('click', () => openSequentialModal(0));
+            document.getElementById('btn-open-all-links').addEventListener('click', openAllMatchedLinks);
+
+            // คลังสินค้าและอัปโหลดหลายรูป
+            const bulkFileInput = document.getElementById('bulk-file-input');
+            const bulkDrop = document.getElementById('bulk-dropzone');
+
+            document.getElementById('btn-pick-bulk').addEventListener('click', () => bulkFileInput.click());
+            bulkDrop.addEventListener('click', () => bulkFileInput.click());
+            document.getElementById('btn-add-more-staging').addEventListener('click', () => bulkFileInput.click());
+            bulkFileInput.addEventListener('change', async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length) await processFilesToStaging(files);
+                e.target.value = '';
+            });
+
+            document.getElementById('btn-clear-staging').addEventListener('click', clearBulkStaging);
+            document.getElementById('btn-cancel-staging').addEventListener('click', clearBulkStaging);
+            document.getElementById('btn-save-bulk').addEventListener('click', saveAllBulkItems);
+
+            document.getElementById('btn-vault-demo').addEventListener('click', loadDemoData);
+            document.getElementById('btn-export-json').addEventListener('click', exportVaultJSON);
+
+            const importJsonInput = document.getElementById('import-json-input');
+            document.getElementById('btn-import-json').addEventListener('click', () => importJsonInput.click());
+            importJsonInput.addEventListener('change', importVaultJSON);
+
+            document.getElementById('vault-search-input').addEventListener('input', renderVaultGrid);
+
+            // ป๊อบอัพตามลำดับ
+            document.getElementById('btn-close-seq').addEventListener('click', closeSequentialModal);
+            document.getElementById('seq-btn-open').addEventListener('click', openCurrentSeqLink);
+            document.getElementById('seq-btn-copy').addEventListener('click', copyCurrentSeqLink);
+            document.getElementById('seq-btn-prev').addEventListener('click', () => navigateSeqModal(-1));
+            document.getElementById('seq-btn-next').addEventListener('click', () => navigateSeqModal(1));
+
+            // แก้ไขรายการ
+            document.getElementById('btn-close-edit').addEventListener('click', closeEditModal);
+            document.getElementById('btn-cancel-edit').addEventListener('click', closeEditModal);
+            document.getElementById('btn-save-edit').addEventListener('click', saveEditedItem);
+
+            // วางรูปจากคลิปบอร์ด (Ctrl+V / Paste) และ Drag & Drop
+            window.addEventListener('paste', async (e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                const imageFiles = [];
+                for (const item of items) {
+                    if (item.type.startsWith('image/')) {
+                        const file = item.getAsFile();
+                        if (file) imageFiles.push(file);
+                    }
+                }
+                if (imageFiles.length > 0) {
+                    const isScanVisible = !document.getElementById('view-scan').classList.contains('hidden');
+                    if (isScanVisible) {
+                        await setScanImageFromFile(imageFiles[0]);
+                        showToast('วางรูปภาพพร้อมสแกนแล้ว!', 'info');
+                    } else {
+                        await processFilesToStaging(imageFiles);
+                    }
+                }
+            });
+
+            [scanDrop, bulkDrop].forEach((zone) => {
+                zone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    zone.classList.add('border-indigo-500', 'bg-indigo-50');
+                });
+                zone.addEventListener('dragleave', () => {
+                    zone.classList.remove('border-indigo-500', 'bg-indigo-50');
+                });
+            });
+
+            scanDrop.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                scanDrop.classList.remove('border-indigo-500', 'bg-indigo-50');
+                const file = e.dataTransfer?.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                    await setScanImageFromFile(file);
+                }
+            });
+
+            bulkDrop.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                bulkDrop.classList.remove('border-indigo-500', 'bg-indigo-50');
+                const files = Array.from(e.dataTransfer?.files || []);
+                if (files.length > 0) {
+                    await processFilesToStaging(files);
+                }
+            });
+        }
+
+        // เริ่มต้นทำงานเมื่อโหลดหน้าเว็บเสร็จ
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (window.lucide) window.lucide.createIcons();
+            bindAllEvents();
+            await loadAllVaultItems();
+        });
+    </script>
+</body>
+</html>
